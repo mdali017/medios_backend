@@ -2,6 +2,8 @@ export type UserRole =
   | 'super_admin'
   | 'admin'
   | 'store_manager'
+  | 'branch_manager'
+  | 'seller'
   | 'customer'
   | 'delivery_man'
 
@@ -12,6 +14,7 @@ export interface Profile {
   phone: string | null
   role: UserRole
   store_id: string | null
+  branch_id: string | null
   pharmacy_name: string | null
   license_number: string | null
   profile_image: string | null
@@ -27,6 +30,9 @@ export interface AuthUser {
   role: UserRole
   storeId?: string | null
   storeName?: string | null
+  branchId?: string | null
+  branchName?: string | null
+  storeHasBranches?: boolean
   profileImage?: string | null
   permissions?: string[]
   pharmacyDetails?: {

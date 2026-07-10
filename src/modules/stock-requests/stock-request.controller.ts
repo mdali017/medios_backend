@@ -14,6 +14,7 @@ export async function createEmergencyNeed(req: Request, res: Response, next: Nex
 export async function listEmergencyNeeds(req: Request, res: Response, next: NextFunction) {
   try {
     const storeId = typeof req.query.storeId === 'string' ? req.query.storeId : undefined
+    const branchId = typeof req.query.branchId === 'string' ? req.query.branchId : undefined
     const status = typeof req.query.status === 'string' ? req.query.status : undefined
     const requestType =
       req.query.requestType === 'restock' || req.query.requestType === 'emergency'
@@ -22,6 +23,7 @@ export async function listEmergencyNeeds(req: Request, res: Response, next: Next
 
     const data = await stockRequestService.listStockRequests(req.user!, {
       storeId,
+      branchId,
       status,
       requestType,
     })

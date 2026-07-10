@@ -8,6 +8,7 @@ import adminRoutes from './modules/admin/admin.routes'
 import storeRoutes from './modules/stores/store.routes'
 import posRoutes from './modules/pos/pos.routes'
 import customerRoutes from './modules/customer/customer.routes'
+import branchManagerRoutes from './modules/branch-manager/branch-manager.routes'
 import { errorHandler, notFoundHandler } from './middleware/errorHandler'
 
 const app = express()
@@ -32,6 +33,7 @@ app.use('/api/v1/admin', adminRoutes)
 app.use('/api/v1/pos', posRoutes)
 app.use('/api/v1/super-admin', storeRoutes)
 app.use('/api/v1/customer', customerRoutes)
+app.use('/api/v1/branch-manager', branchManagerRoutes)
 
 app.use(notFoundHandler)
 app.use(errorHandler)

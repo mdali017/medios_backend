@@ -14,6 +14,7 @@ export const posCheckoutItemSchema = z.object({
 export const posCheckoutSchema = z.object({
   items: z.array(posCheckoutItemSchema).min(1, 'Cart must contain at least one item'),
   notes: z.string().max(500).optional(),
+  branchId: z.string().uuid().optional(),
 })
 
 export type PosCheckoutInput = z.infer<typeof posCheckoutSchema>

@@ -24,13 +24,30 @@ const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'manage_leads',
     'access_pos',
   ],
+  branch_manager: [
+    'manage_orders',
+    'view_products',
+    'request_stock',
+    'manage_sellers',
+    'manage_leads',
+    'access_pos',
+    'view_reports',
+  ],
+  seller: ['access_pos'],
   customer: ['create_order', 'view_products', 'upload_prescription'],
   delivery_man: ['view_assigned_deliveries', 'update_delivery_status'],
 }
 
 export const PUBLIC_REGISTER_ROLES: UserRole[] = ['customer']
 
-export const INTERNAL_ROLES: UserRole[] = ['super_admin', 'admin', 'store_manager', 'delivery_man']
+export const INTERNAL_ROLES: UserRole[] = [
+  'super_admin',
+  'admin',
+  'store_manager',
+  'branch_manager',
+  'seller',
+  'delivery_man',
+]
 
 export function getPermissionsForRole(role: UserRole): string[] {
   return ROLE_PERMISSIONS[role] || []

@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../../config/supabase'
 import { AppError } from '../../utils/AppError'
+import { branchBelongsToStore, storeHasBranches } from '../../utils/branch.helper'
 import type { AuthUser } from '../../types'
 
 export interface DailySalesPoint {
@@ -23,6 +24,8 @@ export interface RecentOrderReport {
   status: string
   totalAmount: number
   orderDate: string
+  branchId: string | null
+  branchName: string | null
 }
 
 export interface StockAlertProduct {
@@ -42,6 +45,8 @@ export interface ReportDateRange {
 
 export interface StoreReportsSummary {
   storeId: string
+  branchId: string | null
+  branchName: string | null
   dateRange: ReportDateRange
   sales: {
     totalRevenue: number
@@ -193,21 +198,45 @@ function buildDailySalesForRange(
 
 export async function getStoreReports(
   requester: AuthUser,
-  filters?: { storeId?: string; startDate?: string; endDate?: string }
+  filters?: { storeId?: string; branchId?: string; startDate?: string; endDate?: string }
 ): Promise<StoreReportsSummary> {
   const storeId = resolveStoreId(requester, filters?.storeId)
   const dateRange = resolveReportDateRange(filters?.startDate, filters?.endDate)
 
+  let branchId: string | null = null
+  let branchName: string | null = null
+
+  if (filters?.branchId) {
+    const valid = await branchBelongsToStore(filters.branchId, storeId)
+    if (!valid) {
+      throw new AppError('Invalid branch for this store', 400)
+    }
+    branchId = filters.branchId
+
+    const { data: branch } = await supabaseAdmin
+      .from('branches')
+      .select('name')
+      .eq('id', branchId)
+      .maybeSingle()
+    branchName = branch?.name ?? null
+  }
+
   const rangeEndExclusive = new Date(dateRange.end)
   rangeEndExclusive.setHours(23, 59, 59, 999)
 
-  const { data: orders, error: ordersError } = await supabaseAdmin
+  let ordersQuery = supabaseAdmin
     .from('orders')
-    .select('id, order_number, order_type, status, total_amount, subtotal, tax_amount, created_at')
+    .select('id, order_number, order_type, status, total_amount, subtotal, tax_amount, created_at, branch_id')
     .eq('store_id', storeId)
     .gte('created_at', dateRange.start.toISOString())
     .lte('created_at', rangeEndExclusive.toISOString())
     .order('created_at', { ascending: false })
+
+  if (branchId) {
+    ordersQuery = ordersQuery.eq('branch_id', branchId)
+  }
+
+  const { data: orders, error: ordersError } = await ordersQuery
 
   if (ordersError) {
     throw new AppError(ordersError.message, 400)
@@ -232,10 +261,23 @@ export async function getStoreReports(
       ? Number((totalRevenue / dateRange.periodDays).toFixed(2))
       : 0
 
-  const { data: products, error: productsError } = await supabaseAdmin
-    .from('products')
-    .select('id, product_name, generic_name, stock_quantity, expiry_date, cost_price_single')
-    .eq('store_id', storeId)
+  const { data: products, error: productsError } = await (async () => {
+    let query = supabaseAdmin
+      .from('products')
+      .select('id, product_name, generic_name, stock_quantity, expiry_date, cost_price_single')
+      .eq('store_id', storeId)
+
+    if (branchId) {
+      query = query.eq('branch_id', branchId)
+    } else {
+      const hasBranches = await storeHasBranches(storeId)
+      if (!hasBranches) {
+        query = query.is('branch_id', null)
+      }
+    }
+
+    return query
+  })()
 
   if (productsError) {
     throw new AppError(productsError.message, 400)
@@ -353,17 +395,42 @@ export async function getStoreReports(
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 10)
 
-  const recentOrders: RecentOrderReport[] = revenueOrders.slice(0, 50).map((order) => ({
-    id: order.id as string,
-    orderNumber: order.order_number as string,
-    orderType: order.order_type as string,
-    status: order.status as string,
-    totalAmount: Number(order.total_amount),
-    orderDate: order.created_at as string,
-  }))
+  const recentOrders: RecentOrderReport[] = await (async () => {
+    const branchIds = new Set<string>()
+    for (const order of revenueOrders.slice(0, 50)) {
+      if (order.branch_id) branchIds.add(order.branch_id as string)
+    }
+
+    const branchNameById = new Map<string, string>()
+    if (branchIds.size > 0) {
+      const { data: branches } = await supabaseAdmin
+        .from('branches')
+        .select('id, name')
+        .in('id', Array.from(branchIds))
+
+      for (const branch of branches || []) {
+        branchNameById.set(branch.id, branch.name)
+      }
+    }
+
+    return revenueOrders.slice(0, 50).map((order) => ({
+      id: order.id as string,
+      orderNumber: order.order_number as string,
+      orderType: order.order_type as string,
+      status: order.status as string,
+      totalAmount: Number(order.total_amount),
+      orderDate: order.created_at as string,
+      branchId: (order.branch_id as string | null) ?? null,
+      branchName: order.branch_id
+        ? branchNameById.get(order.branch_id as string) ?? null
+        : null,
+    }))
+  })()
 
   return {
     storeId,
+    branchId,
+    branchName,
     dateRange: {
       startDate: dateRange.startDate,
       endDate: dateRange.endDate,

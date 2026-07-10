@@ -1,16 +1,19 @@
 import { supabaseAdmin } from '../../config/supabase'
 import { AppError } from '../../utils/AppError'
+import { resolveProductBranchScope, storeHasBranches } from '../../utils/branch.helper'
 import type { AuthUser } from '../../types'
 import type { BulkProductItemInput, BulkUploadProductsInput, UpdateProductInput } from './product.validation'
 
 export interface ProductRecord {
   id: string
   storeId: string
+  branchId: string | null
   productName: string
   genericName: string
   brandName: string
   category: string | null
   company: string | null
+  positionName: string | null
   unitType: string
   description: string | null
   priceSingle: number
@@ -34,11 +37,13 @@ function mapProductRow(row: Record<string, unknown>): ProductRecord {
   return {
     id: row.id as string,
     storeId: row.store_id as string,
+    branchId: (row.branch_id as string | null) ?? null,
     productName: row.product_name as string,
     genericName: row.generic_name as string,
     brandName: row.brand_name as string,
     category: (row.category as string | null) ?? null,
     company: (row.company as string | null) ?? null,
+    positionName: (row.position_name as string | null) ?? null,
     unitType: row.unit_type as string,
     description: (row.description as string | null) ?? null,
     priceSingle: Number(row.price_single),
@@ -59,29 +64,16 @@ function mapProductRow(row: Record<string, unknown>): ProductRecord {
   }
 }
 
-function resolveStoreId(requester: AuthUser, inputStoreId?: string): string {
-  if (requester.role === 'admin') {
-    if (!requester.storeId) {
-      throw new AppError('Store not assigned to this admin', 400)
-    }
-    return requester.storeId
-  }
-
-  if (!inputStoreId) {
-    throw new AppError('Store ID is required', 400)
-  }
-
-  return inputStoreId
-}
-
-function toDbRow(storeId: string, item: BulkProductItemInput) {
+function toDbRow(storeId: string, item: BulkProductItemInput, branchId: string | null) {
   return {
     store_id: storeId,
+    branch_id: branchId,
     product_name: item.productName.trim(),
     generic_name: item.genericName.trim(),
     brand_name: item.brandName.trim(),
     category: item.category?.trim() || null,
     company: item.company?.trim() || null,
+    position_name: item.positionName?.trim() || null,
     unit_type: item.unitType,
     description: item.description?.trim() || null,
     price_single: item.priceSingle,
@@ -102,26 +94,44 @@ function toDbRow(storeId: string, item: BulkProductItemInput) {
 
 export async function listProducts(
   requester: AuthUser,
-  storeIdFilter?: string
+  filters?: { storeId?: string; branchId?: string }
 ): Promise<ProductRecord[]> {
-  let storeId: string | undefined
+  if (requester.role === 'super_admin' && !filters?.storeId) {
+    let query = supabaseAdmin
+      .from('products')
+      .select('*')
+      .order('updated_at', { ascending: false })
 
-  if (requester.role === 'admin') {
-    if (!requester.storeId) {
-      throw new AppError('Store not assigned to this admin', 400)
+    if (filters?.branchId) {
+      query = query.eq('branch_id', filters.branchId)
     }
-    storeId = requester.storeId
-  } else if (storeIdFilter) {
-    storeId = storeIdFilter
+
+    const { data, error } = await query
+
+    if (error) {
+      throw new AppError(error.message, 400)
+    }
+
+    return (data || []).map(mapProductRow)
   }
+
+  const scope = await resolveProductBranchScope(requester, {
+    storeIdFilter: filters?.storeId,
+    branchIdFilter: filters?.branchId,
+  })
 
   let query = supabaseAdmin
     .from('products')
     .select('*')
+    .eq('store_id', scope.storeId)
     .order('updated_at', { ascending: false })
 
-  if (storeId) {
-    query = query.eq('store_id', storeId)
+  if (scope.hasBranches) {
+    if (scope.branchId) {
+      query = query.eq('branch_id', scope.branchId)
+    }
+  } else {
+    query = query.is('branch_id', null)
   }
 
   const { data, error } = await query
@@ -134,20 +144,30 @@ export async function listProducts(
 }
 
 export async function listPosProducts(requester: AuthUser): Promise<ProductRecord[]> {
-  if (requester.role !== 'store_manager' && requester.role !== 'admin') {
-    throw new AppError('You do not have permission to access POS products', 403)
-  }
-
   if (!requester.storeId) {
     throw new AppError('Store not assigned to this user', 400)
   }
 
-  const { data, error } = await supabaseAdmin
+  const hasBranches =
+    requester.storeHasBranches ?? (await storeHasBranches(requester.storeId))
+
+  let query = supabaseAdmin
     .from('products')
     .select('*')
     .eq('store_id', requester.storeId)
     .eq('status', 'active')
     .order('product_name', { ascending: true })
+
+  if (hasBranches) {
+    if (!requester.branchId) {
+      throw new AppError('Branch not assigned to this user', 400)
+    }
+    query = query.eq('branch_id', requester.branchId)
+  } else {
+    query = query.is('branch_id', null)
+  }
+
+  const { data, error } = await query
 
   if (error) {
     throw new AppError(error.message, 400)
@@ -160,19 +180,26 @@ export async function bulkUploadProducts(
   requester: AuthUser,
   input: BulkUploadProductsInput
 ): Promise<{ inserted: number; products: ProductRecord[] }> {
-  const storeId = resolveStoreId(requester, input.storeId)
+  const scope = await resolveProductBranchScope(requester, {
+    storeIdFilter: input.storeId,
+    branchIdFilter: input.branchId,
+  })
+
+  if (scope.hasBranches && !scope.branchId) {
+    throw new AppError('Branch ID is required when uploading products for a branched store', 400)
+  }
 
   const { data: store } = await supabaseAdmin
     .from('stores')
     .select('id')
-    .eq('id', storeId)
+    .eq('id', scope.storeId)
     .maybeSingle()
 
   if (!store) {
     throw new AppError('Store not found', 404)
   }
 
-  const rows = input.products.map((item) => toDbRow(storeId, item))
+  const rows = input.products.map((item) => toDbRow(scope.storeId, item, scope.branchId))
 
   const { data, error } = await supabaseAdmin.from('products').insert(rows).select('*')
 
@@ -201,16 +228,39 @@ async function getProductForRequester(requester: AuthUser, productId: string) {
     throw new AppError('Product not found', 404)
   }
 
-  if (requester.role === 'admin') {
-    if (!requester.storeId) {
-      throw new AppError('Store not assigned to this admin', 400)
-    }
-    if (data.store_id !== requester.storeId) {
-      throw new AppError('You can only manage products from your own store', 403)
-    }
+  const product = mapProductRow(data)
+
+  const staffRoles = ['admin', 'store_manager', 'branch_manager', 'seller'] as const
+  if (!staffRoles.includes(requester.role as (typeof staffRoles)[number])) {
+    throw new AppError('You do not have permission to manage this product', 403)
   }
 
-  return mapProductRow(data)
+  if (!requester.storeId) {
+    throw new AppError('Store not assigned to this user', 400)
+  }
+
+  if (product.storeId !== requester.storeId && requester.role !== 'super_admin') {
+    throw new AppError('You can only manage products from your own store', 403)
+  }
+
+  const hasBranches = await storeHasBranches(product.storeId)
+
+  if (hasBranches) {
+    if (requester.role === 'store_manager') {
+      throw new AppError('Store managers cannot manage branch-scoped products', 403)
+    }
+
+    if (
+      (requester.role === 'branch_manager' || requester.role === 'seller') &&
+      product.branchId !== requester.branchId
+    ) {
+      throw new AppError('You can only access products from your assigned branch', 403)
+    }
+  } else if (product.branchId !== null) {
+    throw new AppError('Invalid product scope for this store', 400)
+  }
+
+  return product
 }
 
 function toUpdateRow(input: UpdateProductInput) {
@@ -221,6 +271,7 @@ function toUpdateRow(input: UpdateProductInput) {
   if (input.brandName !== undefined) updates.brand_name = input.brandName.trim()
   if (input.category !== undefined) updates.category = input.category.trim() || null
   if (input.company !== undefined) updates.company = input.company.trim() || null
+  if (input.positionName !== undefined) updates.position_name = input.positionName.trim() || null
   if (input.unitType !== undefined) updates.unit_type = input.unitType
   if (input.description !== undefined) updates.description = input.description.trim() || null
   if (input.priceSingle !== undefined) updates.price_single = input.priceSingle
@@ -259,6 +310,90 @@ export async function updateProduct(
   }
 
   return mapProductRow(data)
+}
+
+export async function updateProductPosition(
+  requester: AuthUser,
+  productId: string,
+  positionName?: string
+): Promise<ProductRecord> {
+  await getProductForRequester(requester, productId)
+
+  const { data, error } = await supabaseAdmin
+    .from('products')
+    .update({ position_name: positionName?.trim() || null })
+    .eq('id', productId)
+    .select('*')
+    .single()
+
+  if (error) {
+    throw new AppError(error.message, 400)
+  }
+
+  return mapProductRow(data)
+}
+
+export async function bulkCollectProducts(
+  requester: AuthUser,
+  productIds: string[]
+): Promise<{ collected: number; products: ProductRecord[] }> {
+  const uniqueIds = [...new Set(productIds)]
+
+  let storeId: string | undefined
+  let branchId: string | null | undefined
+
+  if (requester.role === 'admin') {
+    if (!requester.storeId) {
+      throw new AppError('Store not assigned to this admin', 400)
+    }
+    storeId = requester.storeId
+    const hasBranches = await storeHasBranches(storeId)
+    if (hasBranches) {
+      branchId = requester.branchId ?? undefined
+    }
+  }
+
+  const { data: existing, error: fetchError } = await supabaseAdmin
+    .from('products')
+    .select('id, store_id, branch_id')
+    .in('id', uniqueIds)
+
+  if (fetchError) {
+    throw new AppError(fetchError.message, 400)
+  }
+
+  const foundIds = new Set((existing || []).map((row) => row.id as string))
+  const missing = uniqueIds.filter((id) => !foundIds.has(id))
+  if (missing.length > 0) {
+    throw new AppError(`Product(s) not found: ${missing.slice(0, 3).join(', ')}`, 404)
+  }
+
+  if (storeId) {
+    const foreign = (existing || []).filter((row) => row.store_id !== storeId)
+    if (foreign.length > 0) {
+      throw new AppError('You can only collect products from your own store', 403)
+    }
+  }
+
+  let updateQuery = supabaseAdmin
+    .from('products')
+    .update({ stock_quantity: 0, status: 'inactive' })
+    .in('id', uniqueIds)
+
+  if (storeId) {
+    updateQuery = updateQuery.eq('store_id', storeId)
+  }
+
+  const { data, error } = await updateQuery.select('*')
+
+  if (error) {
+    throw new AppError(error.message, 400)
+  }
+
+  return {
+    collected: data?.length ?? 0,
+    products: (data || []).map(mapProductRow),
+  }
 }
 
 export async function deleteProduct(requester: AuthUser, productId: string): Promise<void> {
@@ -357,12 +492,22 @@ const MATCH_THRESHOLD = 0.65
 
 export async function matchMedicines(
   medicines: MedicineMatchInput[],
-  storeId?: string
+  storeId?: string,
+  branchId?: string
 ): Promise<MedicineMatchResult[]> {
   let query = supabaseAdmin.from('products').select('*').eq('status', 'active')
 
   if (storeId) {
     query = query.eq('store_id', storeId)
+    const hasBranches = await storeHasBranches(storeId)
+    if (hasBranches) {
+      if (!branchId) {
+        throw new AppError('Branch ID is required when store has branches', 400)
+      }
+      query = query.eq('branch_id', branchId)
+    } else {
+      query = query.is('branch_id', null)
+    }
   }
 
   const { data, error } = await query

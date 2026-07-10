@@ -5,7 +5,8 @@ import * as productService from './product.service'
 export async function listProducts(req: Request, res: Response, next: NextFunction) {
   try {
     const storeId = typeof req.query.storeId === 'string' ? req.query.storeId : undefined
-    const data = await productService.listProducts(req.user!, storeId)
+    const branchId = typeof req.query.branchId === 'string' ? req.query.branchId : undefined
+    const data = await productService.listProducts(req.user!, { storeId, branchId })
     return sendSuccess(res, data)
   } catch (error) {
     next(error)
@@ -34,6 +35,28 @@ export async function updateProduct(req: Request, res: Response, next: NextFunct
   try {
     const data = await productService.updateProduct(req.user!, String(req.params.id), req.body)
     return sendSuccess(res, data, 'Product updated successfully')
+  } catch (error) {
+    next(error)
+  }
+}
+
+export async function updateProductPosition(req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await productService.updateProductPosition(
+      req.user!,
+      String(req.params.id),
+      req.body.positionName
+    )
+    return sendSuccess(res, data, 'Product position updated successfully')
+  } catch (error) {
+    next(error)
+  }
+}
+
+export async function bulkCollectProducts(req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await productService.bulkCollectProducts(req.user!, req.body.productIds)
+    return sendSuccess(res, data, `${data.collected} product(s) marked as collected`)
   } catch (error) {
     next(error)
   }

@@ -4,11 +4,12 @@ import * as orderService from './order.service'
 
 export async function listOrders(req: Request, res: Response, next: NextFunction) {
   try {
+    const storeId = typeof req.query.storeId === 'string' ? req.query.storeId : undefined
+    const branchId = typeof req.query.branchId === 'string' ? req.query.branchId : undefined
     const status = typeof req.query.status === 'string' ? req.query.status : undefined
     const search = typeof req.query.search === 'string' ? req.query.search : undefined
-    const storeId = typeof req.query.storeId === 'string' ? req.query.storeId : undefined
 
-    const data = await orderService.listOrders(req.user!, { status, search, storeId })
+    const data = await orderService.listOrders(req.user!, { status, search, storeId, branchId })
     return sendSuccess(res, data)
   } catch (error) {
     next(error)

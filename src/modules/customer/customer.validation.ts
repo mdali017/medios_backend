@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 export const matchMedicinesSchema = z.object({
   storeId: z.string().uuid().optional(),
+  branchId: z.string().uuid().optional(),
   medicines: z
     .array(
       z.object({

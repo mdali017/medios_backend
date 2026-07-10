@@ -7,6 +7,9 @@ import { placeOnlineOrderSchema } from '../orders/order.validation'
 
 const router = Router()
 
+router.get('/stores', customerController.listPublicStores)
+router.get('/stores/:storeId/branches', customerController.listStoreBranches)
+
 router.post(
   '/products/match',
   validateBody(matchMedicinesSchema),

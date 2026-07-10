@@ -6,7 +6,7 @@ import { createUserSchema } from '../auth/auth.validation'
 import * as storeManagerController from './store-manager.controller'
 import { createStoreManagerSchema } from './store-manager.validation'
 import * as productController from '../products/product.controller'
-import { bulkUploadProductsSchema, updateProductSchema } from '../products/product.validation'
+import { bulkUploadProductsSchema, updateProductSchema, bulkCollectProductsSchema } from '../products/product.validation'
 import * as orderController from '../orders/order.controller'
 import * as reportController from '../reports/report.controller'
 import {
@@ -15,6 +15,10 @@ import {
 } from '../orders/order.validation'
 import * as stockRequestController from '../stock-requests/stock-request.controller'
 import { updateEmergencyNeedStatusSchema } from '../stock-requests/stock-request.validation'
+import * as branchController from '../branches/branch.controller'
+import { createBranchSchema, updateBranchSchema } from '../branches/branch.validation'
+import * as branchManagerController from './branch-manager.controller'
+import { createBranchManagerSchema } from './branch-manager.validation'
 
 const router = Router()
 
@@ -42,6 +46,58 @@ router.post(
 )
 
 router.get(
+  '/branches',
+  authenticate,
+  authorize('super_admin', 'admin'),
+  branchController.listBranches
+)
+
+router.get(
+  '/branches/:id',
+  authenticate,
+  authorize('super_admin', 'admin'),
+  branchController.getBranch
+)
+
+router.post(
+  '/branches',
+  authenticate,
+  authorize('admin'),
+  validateBody(createBranchSchema),
+  branchController.createBranch
+)
+
+router.patch(
+  '/branches/:id',
+  authenticate,
+  authorize('admin'),
+  validateBody(updateBranchSchema),
+  branchController.updateBranch
+)
+
+router.delete(
+  '/branches/:id',
+  authenticate,
+  authorize('admin'),
+  branchController.deactivateBranch
+)
+
+router.get(
+  '/branch-managers',
+  authenticate,
+  authorize('super_admin', 'admin'),
+  branchManagerController.listBranchManagers
+)
+
+router.post(
+  '/branch-managers',
+  authenticate,
+  authorize('admin'),
+  validateBody(createBranchManagerSchema),
+  branchManagerController.createBranchManager
+)
+
+router.get(
   '/products',
   authenticate,
   authorize('super_admin', 'admin'),
@@ -62,6 +118,14 @@ router.put(
   authorize('super_admin', 'admin'),
   validateBody(updateProductSchema),
   productController.updateProduct
+)
+
+router.post(
+  '/products/bulk-collect',
+  authenticate,
+  authorize('super_admin', 'admin'),
+  validateBody(bulkCollectProductsSchema),
+  productController.bulkCollectProducts
 )
 
 router.delete(
@@ -116,9 +180,23 @@ router.get(
 )
 
 router.get(
+  '/reports/medicine-profit',
+  authenticate,
+  authorize('super_admin', 'admin'),
+  reportController.getMedicineProfitList
+)
+
+router.get(
+  '/reports/medicine-profit/:productId',
+  authenticate,
+  authorize('super_admin', 'admin'),
+  reportController.getMedicineProfitDetail
+)
+
+router.get(
   '/emergency-needs',
   authenticate,
-  authorize('super_admin', 'admin', 'store_manager'),
+  authorize('super_admin', 'admin', 'store_manager', 'branch_manager'),
   stockRequestController.listEmergencyNeeds
 )
 

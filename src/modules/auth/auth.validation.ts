@@ -23,9 +23,10 @@ export const createUserSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
   email: z.string().email('Invalid email address'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
-  role: z.enum(['admin', 'store_manager', 'delivery_man']),
+  role: z.enum(['admin', 'store_manager', 'branch_manager', 'seller', 'delivery_man']),
   phone: z.string().optional(),
   storeId: z.string().uuid().optional(),
+  branchId: z.string().uuid().optional(),
 })
 
 export type RegisterInput = z.infer<typeof registerSchema>

@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../../config/supabase'
 import { AppError } from '../../utils/AppError'
+import { storeHasBranches } from '../../utils/branch.helper'
 import type { AuthUser } from '../../types'
 import type {
   CreateEmergencyNeedInput,
@@ -9,6 +10,7 @@ import type {
 export interface StockRequestRecord {
   id: string
   storeId: string
+  branchId: string | null
   productId: string
   productName: string
   genericName: string
@@ -35,6 +37,7 @@ function mapStockRequestRow(
   return {
     id: row.id as string,
     storeId: row.store_id as string,
+    branchId: (row.branch_id as string | null) ?? null,
     productId: row.product_id as string,
     productName: (product?.product_name as string) ?? 'Unknown product',
     genericName: (product?.generic_name as string) ?? '',
@@ -53,7 +56,11 @@ function mapStockRequestRow(
 }
 
 function resolveStoreIdForStaff(requester: AuthUser): string {
-  if (requester.role === 'store_manager' || requester.role === 'admin') {
+  if (
+    requester.role === 'store_manager' ||
+    requester.role === 'branch_manager' ||
+    requester.role === 'admin'
+  ) {
     if (!requester.storeId) {
       throw new AppError('Store not assigned to this user', 400)
     }
@@ -63,13 +70,45 @@ function resolveStoreIdForStaff(requester: AuthUser): string {
   throw new AppError('You do not have permission to manage stock requests', 403)
 }
 
-async function getProductInStore(productId: string, storeId: string) {
-  const { data, error } = await supabaseAdmin
+async function resolveBranchIdForStaff(requester: AuthUser, storeId: string): Promise<string | null> {
+  const hasBranches = await storeHasBranches(storeId)
+
+  if (!hasBranches) {
+    return null
+  }
+
+  if (requester.role === 'branch_manager' || requester.role === 'seller') {
+    if (!requester.branchId) {
+      throw new AppError('Branch not assigned to this user', 400)
+    }
+    return requester.branchId
+  }
+
+  if (requester.role === 'store_manager') {
+    throw new AppError('Store managers cannot create branch-scoped stock requests', 403)
+  }
+
+  return requester.branchId ?? null
+}
+
+async function getProductInStore(
+  productId: string,
+  storeId: string,
+  branchId: string | null
+) {
+  let query = supabaseAdmin
     .from('products')
-    .select('id, store_id, product_name, generic_name, brand_name, stock_quantity')
+    .select('id, store_id, branch_id, product_name, generic_name, brand_name, stock_quantity')
     .eq('id', productId)
     .eq('store_id', storeId)
-    .maybeSingle()
+
+  if (branchId) {
+    query = query.eq('branch_id', branchId)
+  } else {
+    query = query.is('branch_id', null)
+  }
+
+  const { data, error } = await query.maybeSingle()
 
   if (error) {
     throw new AppError(error.message, 400)
@@ -88,12 +127,14 @@ async function createStockRequest(
   requestType: 'emergency' | 'restock'
 ): Promise<StockRequestRecord> {
   const storeId = resolveStoreIdForStaff(requester)
-  const product = await getProductInStore(input.productId, storeId)
+  const branchId = await resolveBranchIdForStaff(requester, storeId)
+  const product = await getProductInStore(input.productId, storeId, branchId)
 
   const { data, error } = await supabaseAdmin
     .from('stock_requests')
     .insert({
       store_id: storeId,
+      branch_id: branchId,
       product_id: input.productId,
       requested_by: requester.id,
       requested_qty: input.requestedQty,
@@ -132,14 +173,30 @@ export async function createBulkRestockRequests(
 
 export async function listStockRequests(
   requester: AuthUser,
-  filters?: { storeId?: string; status?: string; requestType?: 'emergency' | 'restock' }
+  filters?: {
+    storeId?: string
+    branchId?: string
+    status?: string
+    requestType?: 'emergency' | 'restock'
+  }
 ): Promise<StockRequestRecord[]> {
   let storeId: string | undefined
+  let branchId: string | undefined
 
-  if (requester.role === 'admin' || requester.role === 'store_manager') {
+  if (
+    requester.role === 'admin' ||
+    requester.role === 'store_manager' ||
+    requester.role === 'branch_manager'
+  ) {
     storeId = resolveStoreIdForStaff(requester)
+    if (requester.role === 'branch_manager' && requester.branchId) {
+      branchId = requester.branchId
+    } else if (filters?.branchId) {
+      branchId = filters.branchId
+    }
   } else if (requester.role === 'super_admin') {
     storeId = filters?.storeId
+    branchId = filters?.branchId
   } else {
     throw new AppError('You do not have permission to view stock requests', 403)
   }
@@ -154,6 +211,10 @@ export async function listStockRequests(
 
   if (storeId) {
     query = query.eq('store_id', storeId)
+  }
+
+  if (branchId) {
+    query = query.eq('branch_id', branchId)
   }
 
   if (filters?.status) {
@@ -250,9 +311,11 @@ export async function updateEmergencyNeedStatus(
     throw new AppError(error.message, 400)
   }
 
-  const product = await getProductInStore(row.product_id as string, row.store_id as string).catch(
-    () => null
-  )
+  const product = await getProductInStore(
+    row.product_id as string,
+    row.store_id as string,
+    (row.branch_id as string | null) ?? null
+  ).catch(() => null)
 
   return mapStockRequestRow(
     data as StockRequestRow,
@@ -265,19 +328,29 @@ export async function fulfillEmergencyNeed(
   requester: AuthUser,
   requestId: string
 ): Promise<StockRequestRecord> {
-  if (requester.role !== 'store_manager' && requester.role !== 'admin') {
+  if (
+    requester.role !== 'store_manager' &&
+    requester.role !== 'branch_manager' &&
+    requester.role !== 'admin'
+  ) {
     throw new AppError('Only store staff can mark emergency requests as handled', 403)
   }
 
   const storeId = resolveStoreIdForStaff(requester)
+  const branchId = await resolveBranchIdForStaff(requester, storeId).catch(() => null)
 
-  const { data: existing, error: fetchError } = await supabaseAdmin
+  let query = supabaseAdmin
     .from('stock_requests')
     .select('*')
     .eq('id', requestId)
     .eq('store_id', storeId)
     .eq('request_type', 'emergency')
-    .maybeSingle()
+
+  if (branchId) {
+    query = query.eq('branch_id', branchId)
+  }
+
+  const { data: existing, error: fetchError } = await query.maybeSingle()
 
   if (fetchError) {
     throw new AppError(fetchError.message, 400)
@@ -304,9 +377,11 @@ export async function fulfillEmergencyNeed(
     throw new AppError(error.message, 400)
   }
 
-  const product = await getProductInStore(row.product_id as string, row.store_id as string).catch(
-    () => null
-  )
+  const product = await getProductInStore(
+    row.product_id as string,
+    row.store_id as string,
+    (row.branch_id as string | null) ?? null
+  ).catch(() => null)
 
   const requesterProfile = await supabaseAdmin
     .from('profiles')

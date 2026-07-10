@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS public.products (
   brand_name TEXT NOT NULL,
   category TEXT,
   company TEXT,
+  position_name TEXT,
   unit_type public.product_unit_type NOT NULL DEFAULT 'tablet',
   description TEXT,
   price_single NUMERIC(12, 2) NOT NULL CHECK (price_single >= 0),

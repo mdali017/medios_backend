@@ -1,10 +1,12 @@
 import { Router } from 'express'
-import { authenticate, authorize } from '../../middleware/auth'
+import { authenticate } from '../../middleware/auth'
+import { authorizePosAccess } from '../../middleware/posAccess'
 import { validateBody } from '../../middleware/validate'
 import * as productController from '../products/product.controller'
 import * as posController from './pos.controller'
 import { posCheckoutSchema } from './pos.validation'
 import * as stockRequestController from '../stock-requests/stock-request.controller'
+import { updateProductPositionSchema } from '../products/product.validation'
 import {
   createBulkRestockSchema,
   createEmergencyNeedSchema,
@@ -15,14 +17,22 @@ const router = Router()
 router.get(
   '/products',
   authenticate,
-  authorize('store_manager', 'admin'),
+  authorizePosAccess,
   productController.listPosProducts
+)
+
+router.patch(
+  '/products/:id/position',
+  authenticate,
+  authorizePosAccess,
+  validateBody(updateProductPositionSchema),
+  productController.updateProductPosition
 )
 
 router.post(
   '/checkout',
   authenticate,
-  authorize('store_manager', 'admin'),
+  authorizePosAccess,
   validateBody(posCheckoutSchema),
   posController.checkout
 )
@@ -30,7 +40,7 @@ router.post(
 router.post(
   '/emergency-needs',
   authenticate,
-  authorize('store_manager', 'admin'),
+  authorizePosAccess,
   validateBody(createEmergencyNeedSchema),
   stockRequestController.createEmergencyNeed
 )
@@ -38,14 +48,14 @@ router.post(
 router.patch(
   '/emergency-needs/:id/fulfill',
   authenticate,
-  authorize('store_manager', 'admin'),
+  authorizePosAccess,
   stockRequestController.fulfillEmergencyNeed
 )
 
 router.post(
   '/restock-requests',
   authenticate,
-  authorize('store_manager', 'admin'),
+  authorizePosAccess,
   validateBody(createBulkRestockSchema),
   stockRequestController.createBulkRestockRequests
 )

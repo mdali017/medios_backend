@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from 'express'
 import { supabaseAnon, supabaseAdmin } from '../config/supabase'
 import { AppError } from '../utils/AppError'
 import type { AuthUser, Profile, UserRole } from '../types'
+import { storeHasBranches } from '../utils/branch.helper'
 import { getPermissionsForRole } from '../utils/roles'
 
 async function getStoreName(storeId: string): Promise<string | null> {
@@ -14,8 +15,22 @@ async function getStoreName(storeId: string): Promise<string | null> {
   return data?.name ?? null
 }
 
+async function getBranchName(branchId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from('branches')
+    .select('name')
+    .eq('id', branchId)
+    .maybeSingle()
+
+  return data?.name ?? null
+}
+
 async function profileToAuthUser(profile: Profile): Promise<AuthUser> {
   const storeName = profile.store_id ? await getStoreName(profile.store_id) : null
+  const branchName = profile.branch_id ? await getBranchName(profile.branch_id) : null
+  const hasBranches = profile.store_id
+    ? await storeHasBranches(profile.store_id)
+    : false
 
   const user: AuthUser = {
     id: profile.id,
@@ -24,6 +39,9 @@ async function profileToAuthUser(profile: Profile): Promise<AuthUser> {
     role: profile.role,
     storeId: profile.store_id,
     storeName,
+    branchId: profile.branch_id,
+    branchName,
+    storeHasBranches: hasBranches,
     profileImage: profile.profile_image,
     permissions: getPermissionsForRole(profile.role),
   }

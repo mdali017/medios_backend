@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../../config/supabase'
 import { AppError } from '../../utils/AppError'
+import { resolveOnlineOrderBranchId } from '../../utils/branch.helper'
 import type { AuthUser } from '../../types'
 import type { AssignDeliveryStaffInput, PlaceOnlineOrderInput, UpdateOrderStatusInput } from './order.validation'
 
@@ -21,6 +22,8 @@ export interface OrderRecord {
   orderType: string
   status: string
   storeId: string
+  branchId: string | null
+  branchName: string | null
   customerId: string | null
   customerName: string | null
   deliveryStaffId: string | null
@@ -69,6 +72,7 @@ function mapOrderRow(
   row: OrderRow,
   customerName: string | null,
   deliveryStaffName: string | null,
+  branchName: string | null,
   items?: OrderItemRecord[]
 ): OrderRecord {
   return {
@@ -77,6 +81,8 @@ function mapOrderRow(
     orderType: row.order_type as string,
     status: row.status as string,
     storeId: row.store_id as string,
+    branchId: (row.branch_id as string | null) ?? null,
+    branchName,
     customerId: (row.customer_id as string | null) ?? null,
     customerName,
     deliveryStaffId: (row.delivery_staff_id as string | null) ?? null,
@@ -136,7 +142,7 @@ async function getOrderById(orderId: string, storeId?: string): Promise<OrderRow
 
 export async function listOrders(
   requester: AuthUser,
-  filters: { status?: string; search?: string; storeId?: string }
+  filters: { status?: string; search?: string; storeId?: string; branchId?: string }
 ): Promise<OrderRecord[]> {
   const storeId = resolveStoreId(requester, filters.storeId)
 
@@ -153,6 +159,10 @@ export async function listOrders(
     query = query.eq('status', filters.status)
   }
 
+  if (filters.branchId) {
+    query = query.eq('branch_id', filters.branchId)
+  }
+
   const { data, error } = await query
 
   if (error) {
@@ -161,13 +171,16 @@ export async function listOrders(
 
   const rows = (data || []) as OrderRow[]
   const profileIds = new Set<string>()
+  const branchIds = new Set<string>()
 
   for (const row of rows) {
     if (row.customer_id) profileIds.add(row.customer_id as string)
     if (row.delivery_staff_id) profileIds.add(row.delivery_staff_id as string)
+    if (row.branch_id) branchIds.add(row.branch_id as string)
   }
 
   const profileNames = new Map<string, string>()
+  const branchNames = new Map<string, string>()
 
   if (profileIds.size > 0) {
     const { data: profiles } = await supabaseAdmin
@@ -180,11 +193,23 @@ export async function listOrders(
     }
   }
 
+  if (branchIds.size > 0) {
+    const { data: branches } = await supabaseAdmin
+      .from('branches')
+      .select('id, name')
+      .in('id', Array.from(branchIds))
+
+    for (const branch of branches || []) {
+      branchNames.set(branch.id, branch.name)
+    }
+  }
+
   let results = rows.map((row) =>
     mapOrderRow(
       row,
       row.customer_id ? profileNames.get(row.customer_id as string) ?? null : null,
-      row.delivery_staff_id ? profileNames.get(row.delivery_staff_id as string) ?? null : null
+      row.delivery_staff_id ? profileNames.get(row.delivery_staff_id as string) ?? null : null,
+      row.branch_id ? branchNames.get(row.branch_id as string) ?? null : null
     )
   )
 
@@ -220,10 +245,21 @@ export async function getOrder(
   const customerName = await getProfileName((row.customer_id as string | null) ?? null)
   const deliveryStaffName = await getProfileName((row.delivery_staff_id as string | null) ?? null)
 
+  let branchName: string | null = null
+  if (row.branch_id) {
+    const { data: branch } = await supabaseAdmin
+      .from('branches')
+      .select('name')
+      .eq('id', row.branch_id as string)
+      .maybeSingle()
+    branchName = branch?.name ?? null
+  }
+
   return mapOrderRow(
     row,
     customerName,
     deliveryStaffName,
+    branchName,
     (itemRows || []).map((item) => mapOrderItemRow(item as OrderRow))
   )
 }
@@ -388,6 +424,8 @@ export async function placeOnlineOrder(
     throw new AppError('Only customers can place online orders', 403)
   }
 
+  const branchId = await resolveOnlineOrderBranchId(input.storeId, input.branchId)
+
   let subtotal = 0
   let tax = 0
   let itemCount = 0
@@ -395,13 +433,20 @@ export async function placeOnlineOrder(
   const lineItems: Array<Record<string, unknown>> = []
 
   for (const item of input.items) {
-    const { data: product, error } = await supabaseAdmin
+    let productQuery = supabaseAdmin
       .from('products')
       .select('*')
       .eq('id', item.productId)
       .eq('store_id', input.storeId)
       .eq('status', 'active')
-      .maybeSingle()
+
+    if (branchId) {
+      productQuery = productQuery.eq('branch_id', branchId)
+    } else {
+      productQuery = productQuery.is('branch_id', null)
+    }
+
+    const { data: product, error } = await productQuery.maybeSingle()
 
     if (error || !product) {
       throw new AppError(`Product not found: ${item.productId}`, 400)
@@ -452,6 +497,7 @@ export async function placeOnlineOrder(
     .from('orders')
     .insert({
       store_id: input.storeId,
+      branch_id: branchId,
       order_number: orderNumber,
       order_type: 'online',
       status: 'pending',
@@ -486,10 +532,21 @@ export async function placeOnlineOrder(
 
   const customerName = await getProfileName(requester.id)
 
+  let branchName: string | null = null
+  if (branchId) {
+    const { data: branch } = await supabaseAdmin
+      .from('branches')
+      .select('name')
+      .eq('id', branchId)
+      .maybeSingle()
+    branchName = branch?.name ?? null
+  }
+
   return mapOrderRow(
     orderRow as OrderRow,
     customerName,
     null,
+    branchName,
     lineItems.map((line, index) =>
       mapOrderItemRow({
         id: `pending-${index}`,

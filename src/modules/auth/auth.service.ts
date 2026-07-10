@@ -135,6 +135,7 @@ export async function createInternalUser(input: CreateUserInput) {
       role: input.role,
       phone: input.phone,
       store_id: input.storeId,
+      branch_id: input.branchId,
     },
   })
 
@@ -151,6 +152,7 @@ export async function createInternalUser(input: CreateUserInput) {
       phone: input.phone || null,
       role: input.role,
       store_id: input.storeId || null,
+      branch_id: input.branchId || null,
       is_verified: true,
       updated_at: new Date().toISOString(),
     })

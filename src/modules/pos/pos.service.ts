@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../../config/supabase'
 import { emitStockUpdated } from '../../config/socket'
 import { AppError } from '../../utils/AppError'
+import { resolveCheckoutBranchId } from '../../utils/branch.helper'
 import type { AuthUser } from '../../types'
 import type { PosCheckoutInput } from './pos.validation'
 
@@ -24,6 +25,7 @@ export interface PosOrderItemRecord {
 export interface PosOrderRecord {
   id: string
   storeId: string
+  branchId: string | null
   orderNumber: string
   orderType: string
   status: string
@@ -64,6 +66,7 @@ function mapOrderRow(
   return {
     id: row.id as string,
     storeId: row.store_id as string,
+    branchId: (row.branch_id as string | null) ?? null,
     orderNumber: row.order_number as string,
     orderType: row.order_type as string,
     status: row.status as string,
@@ -83,13 +86,11 @@ export async function checkoutPosOrder(
   requester: AuthUser,
   input: PosCheckoutInput
 ): Promise<PosOrderRecord> {
-  if (requester.role !== 'store_manager' && requester.role !== 'admin') {
-    throw new AppError('You do not have permission to checkout POS orders', 403)
-  }
-
   if (!requester.storeId) {
     throw new AppError('Store not assigned to this user', 400)
   }
+
+  const branchId = await resolveCheckoutBranchId(requester, input.branchId)
 
   const rpcItems = input.items.map((item) => ({
     productId: item.productId,
@@ -105,6 +106,7 @@ export async function checkoutPosOrder(
     p_sold_by: requester.id,
     p_items: rpcItems,
     p_notes: input.notes ?? null,
+    p_branch_id: branchId,
   })
 
   if (rpcError) {
@@ -148,15 +150,20 @@ export async function checkoutPosOrder(
       .in('id', productIds)
 
     if (stockRows?.length) {
-      emitStockUpdated(requester.storeId, {
-        updates: stockRows.map((row) => ({
-          productId: row.id as string,
-          stockQuantity: Number(row.stock_quantity),
-        })),
-        source: 'checkout',
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-      })
+      emitStockUpdated(
+        requester.storeId,
+        {
+          updates: stockRows.map((row) => ({
+            productId: row.id as string,
+            stockQuantity: Number(row.stock_quantity),
+          })),
+          source: 'checkout',
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          branchId: order.branchId,
+        },
+        order.branchId
+      )
     }
   }
 

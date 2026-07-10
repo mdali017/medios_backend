@@ -18,6 +18,7 @@ export const assignDeliveryStaffSchema = z.object({
 
 export const placeOnlineOrderSchema = z.object({
   storeId: z.string().uuid('Store ID is required'),
+  branchId: z.string().uuid().optional(),
   items: z
     .array(
       z.object({
