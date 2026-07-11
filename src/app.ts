@@ -3,6 +3,7 @@ import cors from 'cors'
 import helmet from 'helmet'
 import morgan from 'morgan'
 import { env } from './config/env'
+import { getExpressCorsOptions } from './config/cors'
 import authRoutes from './modules/auth/auth.routes'
 import adminRoutes from './modules/admin/admin.routes'
 import storeRoutes from './modules/stores/store.routes'
@@ -14,12 +15,7 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler'
 const app = express()
 
 app.use(helmet())
-app.use(
-  cors({
-    origin: env.frontendUrl,
-    credentials: true,
-  })
-)
+app.use(cors(getExpressCorsOptions()))
 app.use(morgan(env.nodeEnv === 'development' ? 'dev' : 'combined'))
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
