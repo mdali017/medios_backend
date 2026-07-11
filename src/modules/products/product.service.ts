@@ -2,7 +2,7 @@ import { supabaseAdmin } from '../../config/supabase'
 import { AppError } from '../../utils/AppError'
 import { resolveProductBranchScope, storeHasBranches } from '../../utils/branch.helper'
 import type { AuthUser } from '../../types'
-import type { BulkProductItemInput, BulkUploadProductsInput, UpdateProductInput } from './product.validation'
+import type { BulkProductItemInput, BulkUploadProductsInput, BulkImportProductsInput, UpdateProductInput } from './product.validation'
 
 export interface ProductRecord {
   id: string
@@ -210,6 +210,56 @@ export async function bulkUploadProducts(
   return {
     inserted: data?.length ?? 0,
     products: (data || []).map(mapProductRow),
+  }
+}
+
+export async function bulkImportProducts(
+  requester: AuthUser,
+  input: BulkImportProductsInput
+): Promise<{ inserted: number; updated: number; products: ProductRecord[] }> {
+  const scope = await resolveProductBranchScope(requester, {
+    storeIdFilter: input.storeId,
+    branchIdFilter: input.branchId,
+  })
+
+  if (scope.hasBranches && !scope.branchId) {
+    throw new AppError('Branch ID is required when importing products for a branched store', 400)
+  }
+
+  const toInsert: BulkProductItemInput[] = []
+  const toUpdate: Array<{ productId: string; data: UpdateProductInput }> = []
+
+  for (const item of input.products) {
+    const { productId, ...productData } = item
+    if (productId) {
+      toUpdate.push({ productId, data: productData })
+    } else {
+      toInsert.push(productData)
+    }
+  }
+
+  const results: ProductRecord[] = []
+  let insertedCount = 0
+
+  for (const { productId, data } of toUpdate) {
+    const updated = await updateProduct(requester, productId, data)
+    results.push(updated)
+  }
+
+  if (toInsert.length > 0) {
+    const inserted = await bulkUploadProducts(requester, {
+      storeId: input.storeId,
+      branchId: input.branchId,
+      products: toInsert,
+    })
+    insertedCount = inserted.inserted
+    results.push(...inserted.products)
+  }
+
+  return {
+    inserted: insertedCount,
+    updated: toUpdate.length,
+    products: results,
   }
 }
 

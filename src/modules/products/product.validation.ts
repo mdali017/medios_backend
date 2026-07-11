@@ -47,6 +47,16 @@ export const bulkUploadProductsSchema = z.object({
   products: z.array(bulkProductItemSchema).min(1, 'At least one product is required').max(2000),
 })
 
+export const bulkImportProductItemSchema = bulkProductItemSchema.extend({
+  productId: z.string().uuid().optional(),
+})
+
+export const bulkImportProductsSchema = z.object({
+  storeId: z.string().uuid().optional(),
+  branchId: z.string().uuid().optional(),
+  products: z.array(bulkImportProductItemSchema).min(1, 'At least one product is required').max(2000),
+})
+
 export const updateProductSchema = bulkProductItemSchema.partial().refine(
   (data) => Object.keys(data).length > 0,
   { message: 'At least one field is required to update' }
@@ -54,6 +64,8 @@ export const updateProductSchema = bulkProductItemSchema.partial().refine(
 
 export type BulkProductItemInput = z.infer<typeof bulkProductItemSchema>
 export type BulkUploadProductsInput = z.infer<typeof bulkUploadProductsSchema>
+export type BulkImportProductItemInput = z.infer<typeof bulkImportProductItemSchema>
+export type BulkImportProductsInput = z.infer<typeof bulkImportProductsSchema>
 export type UpdateProductInput = z.infer<typeof updateProductSchema>
 
 export const updateProductPositionSchema = z.object({

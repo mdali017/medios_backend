@@ -31,6 +31,19 @@ export async function bulkUploadProducts(req: Request, res: Response, next: Next
   }
 }
 
+export async function bulkImportProducts(req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await productService.bulkImportProducts(req.user!, req.body)
+    const parts = []
+    if (data.updated > 0) parts.push(`${data.updated} updated`)
+    if (data.inserted > 0) parts.push(`${data.inserted} added`)
+    const message = parts.length > 0 ? parts.join(', ') : 'No products imported'
+    return sendSuccess(res, data, `${message} successfully`, 201)
+  } catch (error) {
+    next(error)
+  }
+}
+
 export async function updateProduct(req: Request, res: Response, next: NextFunction) {
   try {
     const data = await productService.updateProduct(req.user!, String(req.params.id), req.body)

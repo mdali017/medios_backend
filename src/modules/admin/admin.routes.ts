@@ -6,7 +6,7 @@ import { createUserSchema } from '../auth/auth.validation'
 import * as storeManagerController from './store-manager.controller'
 import { createStoreManagerSchema } from './store-manager.validation'
 import * as productController from '../products/product.controller'
-import { bulkUploadProductsSchema, updateProductSchema, bulkCollectProductsSchema } from '../products/product.validation'
+import { bulkUploadProductsSchema, updateProductSchema, bulkCollectProductsSchema, bulkImportProductsSchema } from '../products/product.validation'
 import * as orderController from '../orders/order.controller'
 import * as reportController from '../reports/report.controller'
 import {
@@ -19,6 +19,8 @@ import * as branchController from '../branches/branch.controller'
 import { createBranchSchema, updateBranchSchema } from '../branches/branch.validation'
 import * as branchManagerController from './branch-manager.controller'
 import { createBranchManagerSchema } from './branch-manager.validation'
+import * as googleSheetsController from '../google-sheets/google-sheets.controller'
+import { exportGoogleSheetSchema } from '../google-sheets/google-sheets.validation'
 
 const router = Router()
 
@@ -112,6 +114,14 @@ router.post(
   productController.bulkUploadProducts
 )
 
+router.post(
+  '/products/bulk-import',
+  authenticate,
+  authorize('super_admin', 'admin'),
+  validateBody(bulkImportProductsSchema),
+  productController.bulkImportProducts
+)
+
 router.put(
   '/products/:id',
   authenticate,
@@ -133,6 +143,35 @@ router.delete(
   authenticate,
   authorize('super_admin', 'admin'),
   productController.deleteProduct
+)
+
+router.get(
+  '/google-sheets/connect',
+  authenticate,
+  authorize('super_admin', 'admin'),
+  googleSheetsController.getConnectUrl
+)
+
+router.get(
+  '/google-sheets/status',
+  authenticate,
+  authorize('super_admin', 'admin'),
+  googleSheetsController.getStatus
+)
+
+router.delete(
+  '/google-sheets/disconnect',
+  authenticate,
+  authorize('super_admin', 'admin'),
+  googleSheetsController.disconnect
+)
+
+router.post(
+  '/google-sheets/export',
+  authenticate,
+  authorize('super_admin', 'admin'),
+  validateBody(exportGoogleSheetSchema),
+  googleSheetsController.exportProducts
 )
 
 router.get(
