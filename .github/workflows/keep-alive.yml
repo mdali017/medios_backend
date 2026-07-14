@@ -1,18 +1,21 @@
-# Pings /health so the free Render web service does not sleep from inactivity.
-# Schedule is approximate; GitHub may delay cron when the repo is quiet.
+# Fallback keep-alive for the free Render web service.
+# GitHub schedules can be delayed, so use a non-round minute every 5 minutes.
 name: Keep Render Awake
 
 on:
   schedule:
-    # Every 10 minutes
-    - cron: '*/10 * * * *'
+    - cron: '3-58/5 * * * *'
   workflow_dispatch:
 
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 2
     steps:
       - name: Ping /health
         run: |
-          curl -fsS --retry 2 --retry-delay 5 \
-            "https://medios-backend.onrender.com/health"
+          curl --fail --silent --show-error \
+            --retry 3 --retry-all-errors --retry-delay 5 \
+            --header "Cache-Control: no-cache" \
+            --header "User-Agent: MediOS-Keep-Alive/1.0" \
+            "https://medios-backend.onrender.com/health?keepAlive=$(date +%s)"
